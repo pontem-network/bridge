@@ -1,5 +1,7 @@
 # Diem ↔ Pontem Bridge
 
+**THIS PROJECT IS NOT READY FOR PRODUCTION YET, IT'S IN ACTIVE DEVELOPMENT**
+
 This document describes research around building a bridge between Diem and Pontem Network. 
 
 Current goal is to allow transfer assets (mostly standard ERC20 like tokens) between both networks. The bridge is going to be based on Proof of Authority currently and later could be swapped with Governance or even PoS validators. 
@@ -64,8 +66,9 @@ Fees split between all relayers during deposit. Relayers can withdraw their fees
 As both networks support Move language and Move VM, we implemented Bridge contract that can be found in the current repository and can be used on both networks.
 
 TODOs:
-    * Missing fees distribution.
-    * Burn/mint of new tokens (add mint/burn capability).
+
+* Missing fees distribution.
+* Burn/mint of new tokens (add mint/burn capability).
 
 ### LICENSE
 
