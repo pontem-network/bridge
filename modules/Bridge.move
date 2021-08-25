@@ -4,6 +4,7 @@ module Bridge {
     use 0x1::Errors;
     use 0x1::Diem;
     use 0x1::PONT::PONT;
+    use 0x1::Event::{Self, EventHandle};
 
     // Constants.
     // Initial admin account address.
@@ -11,6 +12,13 @@ module Bridge {
 
     // Max relayers.
     const MAX_RELAYERS: u64 = 100;
+
+    // Events
+    struct DepositEvent has drop, store {
+        nonce: u128,
+        amount: u64,
+        currency_code: vector<u8>
+    }
 
     // Configuration.
     struct Configuration has key {
@@ -21,6 +29,9 @@ module Bridge {
         threshold: u64,
         relayers: u64,
         paused: bool,
+        nonce: u128,
+        deposit_events: EventHandle<DepositEvent>,
+        //burn_events: EventHandle<BurnEvent>,
     }
 
     // Token configuration
@@ -74,6 +85,8 @@ module Bridge {
             threshold,
             relayers: 0,
             paused: false,
+            nonce: 0,
+            deposit_events: Event::new_event_handle<DepositEvent>(account),
         });
 
         grant_admin(account);
@@ -123,23 +136,26 @@ module Bridge {
         assert(!borrow_global<Configuration>(DEPLOYER).paused, Errors::custom(E_PAUSED));
     }
 
-    // Deposit and tokens.
     // Deposit and token related functions.
-    // 
+    // Deposit.
     public fun deposit<Token: store>(_account: &signer, _chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, _recipient: vector<u8>, _metadata: vector<u8>) acquires Configuration, TokenConfiguration {
         let fees_value = Diem::value(&fee);
         assert(get_fee() != fees_value, Errors::custom(300)); // Wrong fees.
 
         // Get configs.
         let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.nonce = config.nonce + 1;
+
         let admin_addr = config.admin;
 
-        assert(!exists<TokenConfiguration<Token>>(admin_addr), 301)); // Token configuration doesn't exist.
+        assert(!exists<TokenConfiguration<Token>>(admin_addr), Errors::custom(301)); // Token configuration doesn't exist.
 
         let token_config = borrow_global_mut<TokenConfiguration<Token>>(admin_addr);
 
         // Deposit fees.
         Diem::deposit<PONT>(&mut config.fees, fee);
+
+        let deposit_value = Diem::value(&to_deposit);
 
         // Store fees.
         if (token_config.mintable) {
@@ -148,7 +164,17 @@ module Bridge {
         } else {
             // Token is not mintable, so we deposit it to token configuration storage for later withdraws.
             Diem::deposit(&mut token_config.deposits, to_deposit);
-        }
+        };
+
+        // Emit deposit event.
+        Event::emit_event(
+            &mut config.deposit_events,
+            DepositEvent {
+                nonce: config.nonce,
+                amount: deposit_value,
+                currency_code: Diem::currency_code<Token>(),
+            }
+        );
     }
 
     // Add token configuration to admin.
