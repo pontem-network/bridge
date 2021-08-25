@@ -3,6 +3,7 @@ module Bridge {
     use 0x1::Signer;
     use 0x1::Errors;
     use 0x1::Diem;
+    use 0x1::PONT::PONT;
 
     // Constants.
     // Initial admin account address.
@@ -13,17 +14,21 @@ module Bridge {
 
     // Configuration.
     struct Configuration has key {
+        admin: address,
         chainId: u8,
         fee: u64,
+        fees: Diem::Diem<PONT>,
         threshold: u64,
         relayers: u64,
         paused: bool,
     }
 
     // Token configuration
+    // TODO: add mint/burn capability.
     struct TokenConfiguration<Token: store> has key {
         mintable: bool,
-        deposit: Diem::Diem<Token>,
+        deposits: Diem::Diem<Token>,
+        to_burn: Diem::Diem<Token>,
     }
 
     // Roles.
@@ -62,8 +67,10 @@ module Bridge {
         assert(!exists<Configuration>(addr), Errors::custom(ECNF_EXISTS));
 
         move_to(account, Configuration {
+            admin: addr,
             chainId,
             fee,
+            fees: Diem::zero<PONT>(),
             threshold,
             relayers: 0,
             paused: false,
@@ -86,6 +93,11 @@ module Bridge {
     public fun change_fee(admin: &signer, new_fee: u64) acquires RoleId, Configuration {
         assert_admin(admin);
         borrow_global_mut<Configuration>(DEPLOYER).fee = new_fee;
+    }
+
+    // Get fee.
+    public fun get_fee(): u64 acquires Configuration {
+        borrow_global<Configuration>(DEPLOYER).fee
     }
 
     // Change threshold.
@@ -113,9 +125,28 @@ module Bridge {
 
     // Deposit and tokens.
     // Deposit and token related functions.
-    //public fun deposit<Token: store>(_chainId: u8, to_deposit: Diem<Token>, _recipient: vector<u8>, _metadata: vector<u8>) {
-        // fetch fees.
-    //}
+    // 
+    public fun deposit<Token: store>(_account: &signer, _chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, _recipient: vector<u8>, _metadata: vector<u8>) acquires Configuration, TokenConfiguration {
+        let fees_value = Diem::value(&fee);
+        assert(get_fee() != fees_value, Errors::custom(301)); // Wrong fees.
+
+        // Get configs.
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        let admin_addr = config.admin;
+        let token_config = borrow_global_mut<TokenConfiguration<Token>>(admin_addr);
+
+        // Deposit fees.
+        Diem::deposit<PONT>(&mut config.fees, fee);
+
+        // Store fees.
+        if (token_config.mintable) {
+            // Add current deposit to burn balance.
+            Diem::deposit(&mut token_config.to_burn, to_deposit);
+        } else {
+            // Token is not mintable, so we deposit it to token configuration storage for later withdraws.
+            Diem::deposit(&mut token_config.deposits, to_deposit);
+        }
+    }
 
     // Add token configuration to admin.
     fun add_token_config<Token: store>(admin: &signer, mintable: bool) acquires RoleId {
@@ -123,7 +154,8 @@ module Bridge {
         assert(!exists<TokenConfiguration<Token>>(Signer::address_of(admin)), Errors::custom(ETOKEN_CONFIG_EXISTS));
         move_to(admin, TokenConfiguration<Token> {
             mintable,
-            deposit: Diem::zero<Token>(),
+            deposits: Diem::zero<Token>(),
+            to_burn: Diem::zero<Token>(),
         });
     }
 
@@ -141,7 +173,9 @@ module Bridge {
         assert_admin(admin);
         assert_initialized();
 
-        assert(borrow_global<Configuration>(DEPLOYER).relayers + 1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        assert(config.relayers + 1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
+        config.relayers = config.relayers + 1;
         grant_relayer(relayer);
     }
 
@@ -195,10 +229,11 @@ module Bridge {
     }
 
     // Change admin account.
-    public fun change_admin(admin: &signer, new_admin: &signer) acquires RoleId {
+    public fun change_admin(admin: &signer, new_admin: &signer) acquires RoleId, Configuration {
         assert_admin(admin);
         drop_role(Signer::address_of(admin));
         grant_admin(new_admin);
+        borrow_global_mut<Configuration>(DEPLOYER).admin = Signer::address_of(new_admin);
     }
 
     // Move token configuration from old admin to new admin.
@@ -210,10 +245,14 @@ module Bridge {
         // Check if token configuration already exists on new admin account.
         if (exists<TokenConfiguration<Token>>(admin_addr)) {
             let old_config = borrow_global_mut<TokenConfiguration<Token>>(old_admin);
-            let value = Diem::value(&old_config.deposit);
-            let withdraw = Diem::withdraw<Token>(&mut old_config.deposit, value);
-            
-            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposit, withdraw);
+
+            let deposit_value = Diem::value(&old_config.deposits);
+            let deposit_withdraw = Diem::withdraw<Token>(&mut old_config.deposits, deposit_value);
+            let to_burn_value = Diem::value<Token>(&old_config.to_burn);
+            let to_burn_withdraw = Diem::withdraw(&mut old_config.to_burn, to_burn_value);
+
+            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposits, deposit_withdraw);
+            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).to_burn, to_burn_withdraw);
             borrow_global_mut<TokenConfiguration<Token>>(admin_addr).mintable = mintable;
         } else {
             let config = move_from<TokenConfiguration<Token>>(old_admin);
@@ -225,9 +264,18 @@ module Bridge {
     // Revoke relayer.
     public fun revoke_relayer(admin: &signer, relayer: address) acquires RoleId, Configuration {
         assert_admin(admin);
-        drop_role(relayer); // TODO: Check if account is relayer?
+        drop_role(relayer);
         let conf = borrow_global_mut<Configuration>(DEPLOYER);
         conf.relayers = conf.relayers - 1;
+    }
+
+    // Withdraw fees.
+    // TODO: split fees between relayers.
+    public fun withdraw_fees(admin: &signer): Diem::Diem<PONT> acquires RoleId, Configuration {
+        assert_admin(admin);
+        let conf = borrow_global_mut<Configuration>(DEPLOYER);
+        let value = Diem::value(&conf.fees);
+        Diem::withdraw(&mut conf.fees, value)
     }
 }
 }
