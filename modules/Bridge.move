@@ -2,6 +2,7 @@ address {{sender}} {
 module Bridge {
     use 0x1::Signer;
     use 0x1::Errors;
+    use 0x1::Diem;
 
     // Constants.
     // Initial admin account address.
@@ -17,6 +18,12 @@ module Bridge {
         threshold: u64,
         relayers: u64,
         paused: bool,
+    }
+
+    // Token configuration
+    struct TokenConfiguration<Token: store> has key {
+        mintable: bool,
+        deposit: Diem::Diem<Token>,
     }
 
     // Roles.
@@ -40,6 +47,10 @@ module Bridge {
     const EROLE_EXISTS: u64 = 100;  // Role already published.
     const EROLE_ADMIN: u64 = 101;   // Required admin role.
     const EROLD_RELAYER: u64 = 102; // Required relayer role.
+
+    // Tokens related.
+    const ETOKEN_CONFIG_EXISTS: u64 = 200; // Token config already exists.
+    const ETOKEN_CONFIG_MISSED: u64 = 201; // Token config missed.
 
     // Initialization.
     // Initialize bridge.
@@ -100,9 +111,29 @@ module Bridge {
         assert(!borrow_global<Configuration>(DEPLOYER).paused, Errors::custom(E_PAUSED));
     }
 
+    // Deposit and tokens.
     // Deposit and token related functions.
-    //public fun deposit<Token: store>(_to_deposit: Diem<Token>, _metadata: vector<u8>) {
+    //public fun deposit<Token: store>(_chainId: u8, to_deposit: Diem<Token>, _recipient: vector<u8>, _metadata: vector<u8>) {
+        // fetch fees.
     //}
+
+    // Add token configuration to admin.
+    fun add_token_config<Token: store>(admin: &signer, mintable: bool) acquires RoleId {
+        assert_admin(admin);
+        assert(!exists<TokenConfiguration<Token>>(Signer::address_of(admin)), Errors::custom(ETOKEN_CONFIG_EXISTS));
+        move_to(admin, TokenConfiguration<Token> {
+            mintable,
+            deposit: Diem::zero<Token>(),
+        });
+    }
+
+    // Change token configuration.
+    fun change_token_mintable<Token: store>(admin: &signer, mintable: bool) acquires RoleId, TokenConfiguration {
+        assert_admin(admin);
+        let addr = Signer::address_of(admin);
+        assert(exists<TokenConfiguration<Token>>(addr), Errors::custom(ETOKEN_CONFIG_MISSED));
+        borrow_global_mut<TokenConfiguration<Token>>(addr).mintable = mintable;
+    }
 
     // Relayers.
     // Adding relayer.
@@ -110,8 +141,8 @@ module Bridge {
         assert_admin(admin);
         assert_initialized();
 
-        assert(borrow_global<Configuration>(DEPLOYER).relayers+1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
-        grant_relayer(relayer); 
+        assert(borrow_global<Configuration>(DEPLOYER).relayers + 1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
+        grant_relayer(relayer);
     }
 
     // Role helpers.
@@ -168,6 +199,27 @@ module Bridge {
         assert_admin(admin);
         drop_role(Signer::address_of(admin));
         grant_admin(new_admin);
+    }
+
+    // Move token configuration from old admin to new admin.
+    public fun move_token_config<Token: store>(admin: &signer, old_admin: address, mintable: bool) acquires RoleId, TokenConfiguration {
+        assert_admin(admin);
+        assert(exists<TokenConfiguration<Token>>(old_admin), Errors::custom(ETOKEN_CONFIG_MISSED));
+
+        let admin_addr = Signer::address_of(admin);
+        // Check if token configuration already exists on new admin account.
+        if (exists<TokenConfiguration<Token>>(admin_addr)) {
+            let old_config = borrow_global_mut<TokenConfiguration<Token>>(old_admin);
+            let value = Diem::value(&old_config.deposit);
+            let withdraw = Diem::withdraw<Token>(&mut old_config.deposit, value);
+            
+            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposit, withdraw);
+            borrow_global_mut<TokenConfiguration<Token>>(admin_addr).mintable = mintable;
+        } else {
+            let config = move_from<TokenConfiguration<Token>>(old_admin);
+            config.mintable = mintable;
+            move_to(admin, config);
+        }
     }
 
     // Revoke relayer.
