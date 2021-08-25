@@ -14,10 +14,30 @@ module Bridge {
     const MAX_RELAYERS: u64 = 100;
 
     // Events
+
+    // When new deposit happens.
     struct DepositEvent has drop, store {
+        chainId: u8,
         nonce: u128,
         amount: u64,
         currency_code: vector<u8>
+    }
+
+    // Relay status events.
+    const RELAY_STATUS_ADDED:   u64 = 0; 
+    const RELAY_STATUS_REVOKED: u64 = 1;
+
+    struct RelayersStatus has drop, store {
+        account: address,
+        status: u64,
+        count: u64,
+    }
+
+    // Configuration events: paused, threshold.
+    struct ConfigEvent has drop, store {
+        fee: u64,
+        paused: bool,
+        threshold: u64,
     }
 
     // Configuration.
@@ -31,7 +51,8 @@ module Bridge {
         paused: bool,
         nonce: u128,
         deposit_events: EventHandle<DepositEvent>,
-        //burn_events: EventHandle<BurnEvent>,
+        relayers_status_events: EventHandle<RelayersStatus>,
+        config_events: EventHandle<ConfigEvent>,
     }
 
     // Token configuration
@@ -87,6 +108,8 @@ module Bridge {
             paused: false,
             nonce: 0,
             deposit_events: Event::new_event_handle<DepositEvent>(account),
+            relayers_status_events: Event::new_event_handle<RelayersStatus>(account),
+            config_events: Event::new_event_handle<ConfigEvent>(account),
         });
 
         grant_admin(account);
@@ -105,7 +128,17 @@ module Bridge {
     // Change fee.
     public fun change_fee(admin: &signer, new_fee: u64) acquires RoleId, Configuration {
         assert_admin(admin);
-        borrow_global_mut<Configuration>(DEPLOYER).fee = new_fee;
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.fee = new_fee;
+
+        Event::emit_event(
+            &mut config.config_events,
+            ConfigEvent {
+                fee: config.fee,
+                paused: config.paused,
+                threshold: config.threshold,
+            }
+        );
     }
 
     // Get fee.
@@ -116,19 +149,49 @@ module Bridge {
     // Change threshold.
     public fun change_threshold(admin: &signer, new_threshold: u64) acquires RoleId, Configuration {
         assert_admin(admin);
-        borrow_global_mut<Configuration>(DEPLOYER).threshold = new_threshold;
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.threshold = new_threshold;
+
+        Event::emit_event(
+            &mut config.config_events,
+            ConfigEvent {
+                fee: config.fee,
+                paused: config.paused,
+                threshold: config.threshold,
+            }
+        );
     }
 
     // Pause bridge.
     public fun pause(admin: &signer) acquires RoleId, Configuration {
         assert_admin(admin);
-        borrow_global_mut<Configuration>(DEPLOYER).paused = true;
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.paused = true;
+
+        Event::emit_event(
+            &mut config.config_events,
+            ConfigEvent {
+                fee: config.fee,
+                paused: config.paused,
+                threshold: config.threshold,
+            }
+        );
     }
 
     // Resume bridge.
     public fun resume(admin: &signer) acquires RoleId, Configuration {
         assert_admin(admin);
-        borrow_global_mut<Configuration>(DEPLOYER).paused = false;
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.paused = false;
+
+        Event::emit_event(
+            &mut config.config_events,
+            ConfigEvent {
+                fee: config.fee,
+                paused: config.paused,
+                threshold: config.threshold,
+            }
+        );
     }
 
     // Assert bridge paused.
@@ -139,6 +202,9 @@ module Bridge {
     // Deposit and token related functions.
     // Deposit.
     public fun deposit<Token: store>(_account: &signer, _chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, _recipient: vector<u8>, _metadata: vector<u8>) acquires Configuration, TokenConfiguration {
+        assert_initialized();
+        assert_paused();
+
         let fees_value = Diem::value(&fee);
         assert(get_fee() != fees_value, Errors::custom(300)); // Wrong fees.
 
@@ -170,6 +236,7 @@ module Bridge {
         Event::emit_event(
             &mut config.deposit_events,
             DepositEvent {
+                chainId: config.chainId,
                 nonce: config.nonce,
                 amount: deposit_value,
                 currency_code: Diem::currency_code<Token>(),
@@ -180,6 +247,8 @@ module Bridge {
     // Add token configuration to admin.
     fun add_token_config<Token: store>(admin: &signer, mintable: bool) acquires RoleId {
         assert_admin(admin);
+        assert_initialized();
+
         assert(!exists<TokenConfiguration<Token>>(Signer::address_of(admin)), Errors::custom(ETOKEN_CONFIG_EXISTS));
         move_to(admin, TokenConfiguration<Token> {
             mintable,
@@ -191,6 +260,8 @@ module Bridge {
     // Change token configuration.
     fun change_token_mintable<Token: store>(admin: &signer, mintable: bool) acquires RoleId, TokenConfiguration {
         assert_admin(admin);
+        assert_initialized();
+
         let addr = Signer::address_of(admin);
         assert(exists<TokenConfiguration<Token>>(addr), Errors::custom(ETOKEN_CONFIG_MISSED));
         borrow_global_mut<TokenConfiguration<Token>>(addr).mintable = mintable;
@@ -206,6 +277,34 @@ module Bridge {
         assert(config.relayers + 1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
         config.relayers = config.relayers + 1;
         grant_relayer(relayer);
+
+        Event::emit_event(
+            &mut config.relayers_status_events,
+            RelayersStatus {
+                account: Signer::address_of(relayer),
+                status: RELAY_STATUS_ADDED,
+                count: config.relayers,
+            }
+        );
+    }
+
+    // Revoke relayer.
+    public fun revoke_relayer(admin: &signer, relayer: address) acquires RoleId, Configuration {
+        assert_admin(admin);
+        drop_role(relayer);
+        assert_initialized();
+
+        let config = borrow_global_mut<Configuration>(DEPLOYER);
+        config.relayers = config.relayers - 1;
+
+        Event::emit_event(
+            &mut config.relayers_status_events,
+            RelayersStatus {
+                account: relayer,
+                status: RELAY_STATUS_REVOKED,
+                count: config.relayers,
+            }
+        );
     }
 
     // Role helpers.
@@ -260,6 +359,8 @@ module Bridge {
     // Change admin account.
     public fun change_admin(admin: &signer, new_admin: &signer) acquires RoleId, Configuration {
         assert_admin(admin);
+        assert_initialized();
+
         drop_role(Signer::address_of(admin));
         grant_admin(new_admin);
         borrow_global_mut<Configuration>(DEPLOYER).admin = Signer::address_of(new_admin);
@@ -268,6 +369,8 @@ module Bridge {
     // Move token configuration from old admin to new admin.
     public fun move_token_config<Token: store>(admin: &signer, old_admin: address, mintable: bool) acquires RoleId, TokenConfiguration {
         assert_admin(admin);
+        assert_initialized();
+
         assert(exists<TokenConfiguration<Token>>(old_admin), Errors::custom(ETOKEN_CONFIG_MISSED));
 
         let admin_addr = Signer::address_of(admin);
@@ -290,18 +393,12 @@ module Bridge {
         }
     }
 
-    // Revoke relayer.
-    public fun revoke_relayer(admin: &signer, relayer: address) acquires RoleId, Configuration {
-        assert_admin(admin);
-        drop_role(relayer);
-        let conf = borrow_global_mut<Configuration>(DEPLOYER);
-        conf.relayers = conf.relayers - 1;
-    }
-
     // Withdraw fees.
     // TODO: split fees between relayers.
     public fun withdraw_fees(admin: &signer): Diem::Diem<PONT> acquires RoleId, Configuration {
         assert_admin(admin);
+        assert_initialized();
+
         let conf = borrow_global_mut<Configuration>(DEPLOYER);
         let value = Diem::value(&conf.fees);
         Diem::withdraw(&mut conf.fees, value)
