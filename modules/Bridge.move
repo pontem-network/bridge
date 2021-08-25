@@ -128,11 +128,14 @@ module Bridge {
     // 
     public fun deposit<Token: store>(_account: &signer, _chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, _recipient: vector<u8>, _metadata: vector<u8>) acquires Configuration, TokenConfiguration {
         let fees_value = Diem::value(&fee);
-        assert(get_fee() != fees_value, Errors::custom(301)); // Wrong fees.
+        assert(get_fee() != fees_value, Errors::custom(300)); // Wrong fees.
 
         // Get configs.
         let config = borrow_global_mut<Configuration>(DEPLOYER);
         let admin_addr = config.admin;
+
+        assert(!exists<TokenConfiguration<Token>>(admin_addr), 301)); // Token configuration doesn't exist.
+
         let token_config = borrow_global_mut<TokenConfiguration<Token>>(admin_addr);
 
         // Deposit fees.
