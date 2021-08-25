@@ -74,11 +74,11 @@ module Bridge {
 
     // Errors.
     // Initialization.
-    const ENOT_DEPLOYER: u64 = 10; // Not a deployer account.
-    const ECNF_EXISTS: u64 = 11; // Configuration already exists.
-    const ENOT_INIT: u64 = 12; // Bridge not initialized;
-    const ETOO_MUCH_RELAYERS: u64 = 13; // Too much relayers.
-    const E_PAUSED: u64 = 14; // Bridge paused.
+    const ECFG_NOT_DEPLOYER: u64 = 10; // Not a deployer account.
+    const ECFG_EXISTS: u64 = 11; // Configuration already exists.
+    const ECFG_NOT_INIT: u64 = 12; // Bridge not initialized;
+    const ECFG_TOO_MUCH_RELAYERS: u64 = 13; // Too much relayers.
+    const ECFG_PAUSED: u64 = 14; // Bridge paused.
 
     // Roles related.
     const EROLE_EXISTS: u64 = 100;  // Role already published.
@@ -93,10 +93,10 @@ module Bridge {
     // Initialize bridge.
     public fun initialize(account: &signer, chainId: u8, fee: u64, threshold: u64) {
         let addr = Signer::address_of(account);
-        assert(addr != DEPLOYER, Errors::custom(ENOT_DEPLOYER));
+        assert(addr != DEPLOYER, Errors::custom(ECFG_NOT_DEPLOYER));
 
         // Check if configuration already exists.
-        assert(!exists<Configuration>(addr), Errors::custom(ECNF_EXISTS));
+        assert(!exists<Configuration>(addr), Errors::custom(ECFG_EXISTS));
 
         move_to(account, Configuration {
             admin: addr,
@@ -122,7 +122,7 @@ module Bridge {
 
     // Throw error if bridge is not initialized.
     public fun assert_initialized() {
-        assert(!exists<Configuration>(DEPLOYER), Errors::custom(ENOT_INIT));
+        assert(!exists<Configuration>(DEPLOYER), Errors::custom(ECFG_NOT_INIT));
     }
 
     // Change fee.
@@ -196,7 +196,7 @@ module Bridge {
 
     // Assert bridge paused.
     fun assert_paused() acquires Configuration {
-        assert(!borrow_global<Configuration>(DEPLOYER).paused, Errors::custom(E_PAUSED));
+        assert(!borrow_global<Configuration>(DEPLOYER).paused, Errors::custom(ECFG_PAUSED));
     }
 
     // Deposit and token related functions.
@@ -274,7 +274,7 @@ module Bridge {
         assert_initialized();
 
         let config = borrow_global_mut<Configuration>(DEPLOYER);
-        assert(config.relayers + 1 != MAX_RELAYERS, Errors::custom(ETOO_MUCH_RELAYERS));
+        assert(config.relayers + 1 != MAX_RELAYERS, Errors::custom(ECFG_TOO_MUCH_RELAYERS));
         config.relayers = config.relayers + 1;
         grant_relayer(relayer);
 
