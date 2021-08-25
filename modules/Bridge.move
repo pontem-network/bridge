@@ -16,6 +16,7 @@ module Bridge {
         fee: u64,
         threshold: u64,
         relayers: u64,
+        paused: bool,
     }
 
     // Roles.
@@ -33,6 +34,7 @@ module Bridge {
     const ECNF_EXISTS: u64 = 11; // Configuration already exists.
     const ENOT_INIT: u64 = 12; // Bridge not initialized;
     const ETOO_MUCH_RELAYERS: u64 = 13; // Too much relayers.
+    const E_PAUSED: u64 = 14; // Bridge paused.
 
     // Roles related.
     const EROLE_EXISTS: u64 = 100;  // Role already published.
@@ -53,19 +55,54 @@ module Bridge {
             fee,
             threshold,
             relayers: 0,
+            paused: false,
         });
 
         grant_admin(account);
     }
-    
+
     // Is bridge initialized?
     public fun is_initialized(): bool {
         exists<Configuration>(DEPLOYER)
     }
 
+    // Throw error if bridge is not initialized.
     public fun assert_initialized() {
         assert(!exists<Configuration>(DEPLOYER), Errors::custom(ENOT_INIT));
     }
+
+    // Change fee.
+    public fun change_fee(admin: &signer, new_fee: u64) acquires RoleId, Configuration {
+        assert_admin(admin);
+        borrow_global_mut<Configuration>(DEPLOYER).fee = new_fee;
+    }
+
+    // Change threshold.
+    public fun change_threshold(admin: &signer, new_threshold: u64) acquires RoleId, Configuration {
+        assert_admin(admin);
+        borrow_global_mut<Configuration>(DEPLOYER).threshold = new_threshold;
+    }
+
+    // Pause bridge.
+    public fun pause(admin: &signer) acquires RoleId, Configuration {
+        assert_admin(admin);
+        borrow_global_mut<Configuration>(DEPLOYER).paused = true;
+    }
+
+    // Resume bridge.
+    public fun resume(admin: &signer) acquires RoleId, Configuration {
+        assert_admin(admin);
+        borrow_global_mut<Configuration>(DEPLOYER).paused = false;
+    }
+
+    // Assert bridge paused.
+    fun assert_paused() acquires Configuration {
+        assert(!borrow_global<Configuration>(DEPLOYER).paused, Errors::custom(E_PAUSED));
+    }
+
+    // Deposit and token related functions.
+    //public fun deposit<Token: store>(_to_deposit: Diem<Token>, _metadata: vector<u8>) {
+    //}
 
     // Relayers.
     // Adding relayer.
