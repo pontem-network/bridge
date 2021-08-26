@@ -8,6 +8,8 @@ module Bridge {
     use 0x1::DiemBlock;
     use 0x1::Vector;
     use 0x1::Option;
+    use 0x1::BCS;
+    use 0x1::Hash;
 
     // Constants.
     // Initial admin account address.
@@ -22,7 +24,9 @@ module Bridge {
         chainId: u8,
         nonce: u128,
         amount: u64,
-        currency_code: vector<u8>
+        currency_code: vector<u8>,
+        recipient: address,
+        metadata: vector<u8>,
     }
 
     // Relay status events.
@@ -60,7 +64,7 @@ module Bridge {
         config_events: EventHandle<ConfigEvent>,
     }
 
-    // Token configuration
+    // Token configuration.
     // TODO: add mint/burn capability.
     struct TokenConfiguration<Token: store + drop> has key {
         mintable: bool,
@@ -75,7 +79,7 @@ module Bridge {
     struct Proposal<Token: store + drop> has key, store, drop {
         id: u128,
         amount: u64,
-        recipient: vector<u8>,
+        recipient: address,
         metadata: vector<u8>,
         deadline: u64,
         votes_yes: vector<address>,
@@ -117,7 +121,8 @@ module Bridge {
     const EPROPOSAL_WRONG_CHAIN_ID: u64 = 402; // Wrong chain id.
     const EPROPOSAL_MISSED: u64 = 403; // Proposal missed.
     const EPROPOSAL_WRONG_ID: u64 = 404; // Wrong id.
-    const EPROPOSAL_DOUBLE_VOTE: u64 = 404; // Double vote for proposal
+    const EPROPOSAL_DOUBLE_VOTE: u64 = 404; // Double vote for proposal.
+    const EPROPOSAL_WRONG_DATA: u64 = 405; // Wrong data when vote for proposal.
 
     // Initialization.
     // Initialize bridge.
@@ -232,7 +237,7 @@ module Bridge {
 
     // Deposit and token related functions.
     // Deposit.
-    public fun deposit<Token: store + drop>(chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, _recipient: vector<u8>, _metadata: vector<u8>) acquires Configuration, TokenConfiguration {
+    public fun deposit<Token: store + drop>(chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, recipient: address, metadata: vector<u8>) acquires Configuration, TokenConfiguration {
         assert_initialized();
         assert_paused();
 
@@ -273,6 +278,8 @@ module Bridge {
                 chainId: chainId,
                 nonce: config.nonce,
                 amount: deposit_value,
+                recipient,
+                metadata,
                 currency_code: Diem::currency_code<Token>(),
             }
         );
@@ -280,7 +287,7 @@ module Bridge {
 
     // Creating proposal, relayer choosed using standard off-chain round robin.
     // See README for better explanation.
-    public fun create_proposal<Token: store + drop>(relayer: &signer, id: u128, chainId: u8, currency_code: vector<u8>, amount: u64, recipient: vector<u8>, metadata: vector<u8>) acquires RoleId, Configuration {
+    public fun create_proposal<Token: store + drop>(relayer: &signer, id: u128, chainId: u8, currency_code: vector<u8>, amount: u64, recipient: address, metadata: vector<u8>) acquires RoleId, Configuration {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -310,7 +317,7 @@ module Bridge {
     }
 
     // Vote for proposal.
-    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, _data_hash: vector<u8>) : Option::Option<Diem::Diem<Token>> acquires RoleId, Configuration, TokenConfiguration, Proposal {
+    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) : Option::Option<Diem::Diem<Token>> acquires RoleId, Configuration, TokenConfiguration, Proposal {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -331,7 +338,17 @@ module Bridge {
             return Option::none<Diem::Diem<Token>>()
         };
 
-        // match data_hash.
+        // Match data_hash.
+        let expected_hash: vector<u8> = Vector::empty();
+        Vector::append(&mut expected_hash, BCS::to_bytes(&proposal.id));
+        Vector::append(&mut expected_hash, BCS::to_bytes(&config.chainId));
+        Vector::append(&mut expected_hash, BCS::to_bytes(&proposal.recipient));
+        Vector::append(&mut expected_hash, BCS::to_bytes(&proposal.amount));
+        Vector::append(&mut expected_hash, BCS::to_bytes(&proposal.metadata));  
+        expected_hash = Hash::sha2_256(expected_hash);
+
+        assert(expected_hash == data_hash, Errors::custom(EPROPOSAL_WRONG_DATA));  
+
         let relayer_addr = Signer::address_of(relayer);
 
         // Check double votes.
@@ -367,7 +384,7 @@ module Bridge {
 
 
         Option::none<Diem::Diem<Token>>()
-    } 
+    }
 
     // Remove porposal in case of deadline.
     public fun remove_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal {
