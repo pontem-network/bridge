@@ -112,7 +112,7 @@ module Bridge {
     // Initialize bridge.
     public fun initialize(account: &signer, chainId: u8, fee: u64, threshold: u64, deadline: u64) {
         let addr = Signer::address_of(account);
-        assert(addr != DEPLOYER, Errors::custom(ECFG_NOT_DEPLOYER));
+        assert(addr == DEPLOYER, Errors::custom(ECFG_NOT_DEPLOYER));
 
         // Check if configuration already exists.
         assert(!exists<Configuration>(addr), Errors::custom(ECFG_EXISTS));
@@ -142,7 +142,7 @@ module Bridge {
 
     // Throw error if bridge is not initialized.
     public fun assert_initialized() {
-        assert(!exists<Configuration>(DEPLOYER), Errors::custom(ECFG_NOT_INIT));
+        assert(is_initialized(), Errors::custom(ECFG_NOT_INIT));
     }
 
     // Change fee.
@@ -226,7 +226,7 @@ module Bridge {
         assert_paused();
 
         let fees_value = Diem::value(&fee);
-        assert(get_fee() != fees_value, Errors::custom(300)); // Wrong fees.
+        assert(get_fee() == fees_value, Errors::custom(300)); // Wrong fees.
 
         // Get configs.
         let config = borrow_global_mut<Configuration>(DEPLOYER);
@@ -234,7 +234,8 @@ module Bridge {
 
         let admin_addr = config.admin;
 
-        assert(!exists<TokenConfiguration<Token>>(admin_addr), Errors::custom(301)); // Token configuration doesn't exist.
+        // Token configuration doesn't exist.
+        assert(exists<TokenConfiguration<Token>>(admin_addr), Errors::custom(301)); 
 
         let token_config = borrow_global_mut<TokenConfiguration<Token>>(admin_addr);
 
@@ -275,11 +276,11 @@ module Bridge {
         assert(!exists<Proposal<Token>>(Signer::address_of(relayer)), Errors::custom(302));
 
         // Check if currency code matches.
-        assert(Diem::currency_code<Token>() != currency_code, Errors::custom(303));
+        assert(Diem::currency_code<Token>() == currency_code, Errors::custom(303));
 
         let config = borrow_global<Configuration>(DEPLOYER);
 
-        assert(config.chainId != chainId, Errors::custom(304));
+        assert(config.chainId == chainId, Errors::custom(304));
 
         let deadline = DiemBlock::get_current_block_height() + config.deadline;
 
@@ -304,8 +305,7 @@ module Bridge {
         // Check proposal exists.
         assert(exists<Proposal<Token>>(proposer), Errors::custom(302));
 
-        let config = borrow_global<Configuration>(DEPLOYER);
-
+        let config   = borrow_global<Configuration>(DEPLOYER);
         let proposal = borrow_global_mut<Proposal<Token>>(proposer);
 
         assert(proposal.id == id, Errors::custom(404));
@@ -322,8 +322,8 @@ module Bridge {
         let relayer_addr = Signer::address_of(relayer);
 
         // Check double votes.
-        assert(Vector::contains(&proposal.votes_yes, &relayer_addr), Errors::custom(401));
-        assert(Vector::contains(&proposal.votes_no,  &relayer_addr), Errors::custom(401));
+        assert(!Vector::contains(&proposal.votes_yes, &relayer_addr), Errors::custom(401));
+        assert(!Vector::contains(&proposal.votes_no,  &relayer_addr), Errors::custom(401));
 
         if (yes) {
             Vector::push_back(&mut proposal.votes_yes, relayer_addr);
@@ -360,11 +360,11 @@ module Bridge {
     public fun remove_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal {
         assert_initialized();
 
-        assert(!exists<Proposal<Token>>(proposer), Errors::custom(305));
+        assert(exists<Proposal<Token>>(proposer), Errors::custom(305));
 
         let proposal = borrow_global<Proposal<Token>>(proposer);
 
-        assert(proposal.id != id, Errors::custom(306));
+        assert(proposal.id == id, Errors::custom(306));
 
         let config = borrow_global<Configuration>(DEPLOYER); 
 
@@ -394,14 +394,6 @@ module Bridge {
 
         PROPOSAL_STATUS_VOTING
     }
-
-    //public fun remove_proposal_by_deadline<Token: store>() {
-    //
-    //}
-    
-    //public fun vote<Token: store>(relayer: &signer, proposer_address: address, id: u128, data_hash: vector<u8>) acquires RoleId {
-    //
-    //}
 
     // Add token configuration to admin.
     fun add_token_config<Token: store + drop>(admin: &signer, mintable: bool) acquires RoleId {
@@ -450,8 +442,9 @@ module Bridge {
     // Revoke relayer.
     public fun revoke_relayer(admin: &signer, relayer: address) acquires RoleId, Configuration {
         assert_admin(admin);
-        drop_role(relayer);
         assert_initialized();
+
+        drop_role(relayer);
 
         let config = borrow_global_mut<Configuration>(DEPLOYER);
         config.relayers = config.relayers - 1;
@@ -507,12 +500,12 @@ module Bridge {
 
     // Throw error if it's not admin.
     fun assert_admin(account: &signer) acquires RoleId {
-        assert(!is_admin(account), Errors::custom(EROLE_ADMIN));
+        assert(is_admin(account), Errors::custom(EROLE_ADMIN));
     }
 
     // Throw error if it's not relayer.
     fun assert_relayer(account: &signer) acquires RoleId {
-        assert(!is_relayer(account), Errors::custom(EROLD_RELAYER));
+        assert(is_relayer(account), Errors::custom(EROLD_RELAYER));
     }
 
     // Change admin account.
