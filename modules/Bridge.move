@@ -108,6 +108,17 @@ module Bridge {
     const ETOKEN_CONFIG_EXISTS: u64 = 200; // Token config already exists.
     const ETOKEN_CONFIG_MISSED: u64 = 201; // Token config missed.
 
+    // Deposits.
+    const EDEPOSIT_WRONG_FEE: u64 = 300; // Wrong fee provided to deposit.
+
+    // Proposals.
+    const EPROPOSAL_EXISTS: u64 = 400;   // Proposal already exists.
+    const EPROPOSAL_WRONG_CC: u64 = 401; // Wrong currency code.
+    const EPROPOSAL_WRONG_CHAIN_ID: u64 = 402; // Wrong chain id.
+    const EPROPOSAL_MISSED: u64 = 403; // Proposal missed.
+    const EPROPOSAL_WRONG_ID: u64 = 404; // Wrong id.
+    const EPROPOSAL_DOUBLE_VOTE: u64 = 404; // Double vote for proposal
+
     // Initialization.
     // Initialize bridge.
     public fun initialize(account: &signer, chainId: u8, fee: u64, threshold: u64, deadline: u64) {
@@ -226,7 +237,9 @@ module Bridge {
         assert_paused();
 
         let fees_value = Diem::value(&fee);
-        assert(get_fee() == fees_value, Errors::custom(300)); // Wrong fees.
+
+        // Wrong fee.
+        assert(get_fee() == fees_value, Errors::custom(EDEPOSIT_WRONG_FEE));
 
         // Get configs.
         let config = borrow_global_mut<Configuration>(DEPLOYER);
@@ -235,7 +248,7 @@ module Bridge {
         let admin_addr = config.admin;
 
         // Token configuration doesn't exist.
-        assert(exists<TokenConfiguration<Token>>(admin_addr), Errors::custom(301)); 
+        assert(exists<TokenConfiguration<Token>>(admin_addr), Errors::custom(ETOKEN_CONFIG_MISSED)); 
 
         let token_config = borrow_global_mut<TokenConfiguration<Token>>(admin_addr);
 
@@ -273,14 +286,14 @@ module Bridge {
         assert_relayer(relayer);
 
         // Check if proposal already exists on account.
-        assert(!exists<Proposal<Token>>(Signer::address_of(relayer)), Errors::custom(302));
+        assert(!exists<Proposal<Token>>(Signer::address_of(relayer)), Errors::custom(EPROPOSAL_EXISTS));
 
         // Check if currency code matches.
-        assert(Diem::currency_code<Token>() == currency_code, Errors::custom(303));
+        assert(Diem::currency_code<Token>() == currency_code, Errors::custom(EPROPOSAL_WRONG_CC));
 
         let config = borrow_global<Configuration>(DEPLOYER);
 
-        assert(config.chainId == chainId, Errors::custom(304));
+        assert(config.chainId == chainId, Errors::custom(EPROPOSAL_WRONG_CHAIN_ID));
 
         let deadline = DiemBlock::get_current_block_height() + config.deadline;
 
@@ -303,12 +316,12 @@ module Bridge {
         assert_relayer(relayer);
 
         // Check proposal exists.
-        assert(exists<Proposal<Token>>(proposer), Errors::custom(302));
+        assert(exists<Proposal<Token>>(proposer), Errors::custom(EPROPOSAL_MISSED));
 
         let config   = borrow_global<Configuration>(DEPLOYER);
         let proposal = borrow_global_mut<Proposal<Token>>(proposer);
 
-        assert(proposal.id == id, Errors::custom(404));
+        assert(proposal.id == id, Errors::custom(EPROPOSAL_WRONG_ID));
 
         let status = proposal_status(proposal, config);
 
@@ -322,8 +335,8 @@ module Bridge {
         let relayer_addr = Signer::address_of(relayer);
 
         // Check double votes.
-        assert(!Vector::contains(&proposal.votes_yes, &relayer_addr), Errors::custom(401));
-        assert(!Vector::contains(&proposal.votes_no,  &relayer_addr), Errors::custom(401));
+        assert(!Vector::contains(&proposal.votes_yes, &relayer_addr), Errors::custom(EPROPOSAL_DOUBLE_VOTE));
+        assert(!Vector::contains(&proposal.votes_no,  &relayer_addr), Errors::custom(EPROPOSAL_DOUBLE_VOTE));
 
         if (yes) {
             Vector::push_back(&mut proposal.votes_yes, relayer_addr);
@@ -360,11 +373,11 @@ module Bridge {
     public fun remove_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal {
         assert_initialized();
 
-        assert(exists<Proposal<Token>>(proposer), Errors::custom(305));
+        assert(exists<Proposal<Token>>(proposer), Errors::custom(EPROPOSAL_MISSED));
 
         let proposal = borrow_global<Proposal<Token>>(proposer);
 
-        assert(proposal.id == id, Errors::custom(306));
+        assert(proposal.id == id, Errors::custom(EPROPOSAL_WRONG_ID));
 
         let config = borrow_global<Configuration>(DEPLOYER); 
 
