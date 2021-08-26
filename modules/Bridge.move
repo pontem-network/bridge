@@ -2,12 +2,12 @@ address {{sender}} {
 module Bridge {
     use 0x1::Signer;
     use 0x1::Errors;
-    use 0x1::Diem;
+    use 0x1::Diem::{Self, Diem};
     use 0x1::PONT::PONT;
     use 0x1::Event::{Self, EventHandle};
     use 0x1::DiemBlock;
     use 0x1::Vector;
-    use 0x1::Option;
+    use 0x1::Option::{Self, Option};
     use 0x1::BCS;
     use 0x1::Hash;
 
@@ -33,7 +33,7 @@ module Bridge {
     const RELAY_STATUS_ADDED:   u64 = 0; 
     const RELAY_STATUS_REVOKED: u64 = 1;
 
-    struct RelayersStatus has drop, store {
+    struct RelayersStatusEvent has drop, store {
         account: address,
         status: u64,
         count: u64,
@@ -46,12 +46,35 @@ module Bridge {
         threshold: u64,
     }
 
+    // Proposal created event.
+    struct ProposalEvent has drop, store {
+        relayer: address,
+        id: u128,
+        currency_code: vector<u8>,
+        amount: u64,
+        recipient: address,
+        deadline: u64,
+    }
+
+    // Vote for proposal event.
+    struct VoteEvent has drop, store {
+        id: u128,
+        relayer: address,
+        yes: bool,
+    }
+
+    // Proposal status changed (passed/rejected).
+    struct ProposalStatusEvent has drop, store {
+        id: u128,
+        status: u64
+    }
+
     // Configuration.
     struct Configuration has key {
         admin: address, // Address of admin account.
         chainId: u8, // Id of current chain.
         fee: u64, // Fee amount in PONT.
-        fees: Diem::Diem<PONT>, // Collecting PONT fees here.
+        fees: Diem<PONT>, // Collecting PONT fees here.
         threshold: u64, // Current threshold.
         relayers: u64, // Current amount of relayers.
         paused: bool, // Is bridge paused.
@@ -60,16 +83,19 @@ module Bridge {
 
         // Events handlers.
         deposit_events: EventHandle<DepositEvent>,
-        relayers_status_events: EventHandle<RelayersStatus>,
+        relayers_status_events: EventHandle<RelayersStatusEvent>,
         config_events: EventHandle<ConfigEvent>,
+        proposal_events: EventHandle<ProposalEvent>,
+        vote_events: EventHandle<VoteEvent>,
+        proposal_status_events: EventHandle<ProposalStatusEvent>
     }
 
     // Token configuration.
     // TODO: add mint/burn capability.
     struct TokenConfiguration<Token: store + drop> has key {
         mintable: bool,
-        deposits: Diem::Diem<Token>,
-        to_burn: Diem::Diem<Token>,
+        deposits: Diem<Token>,
+        to_burn: Diem<Token>,
     }
 
     // Proposal.
@@ -144,8 +170,11 @@ module Bridge {
             nonce: 0,
             deadline,
             deposit_events: Event::new_event_handle<DepositEvent>(account),
-            relayers_status_events: Event::new_event_handle<RelayersStatus>(account),
+            relayers_status_events: Event::new_event_handle<RelayersStatusEvent>(account),
             config_events: Event::new_event_handle<ConfigEvent>(account),
+            proposal_events: Event::new_event_handle<ProposalEvent>(account),
+            vote_events: Event::new_event_handle<VoteEvent>(account),
+            proposal_status_events: Event::new_event_handle<ProposalStatusEvent>(account),
         });
 
         grant_admin(account);
@@ -237,7 +266,7 @@ module Bridge {
 
     // Deposit and token related functions.
     // Deposit.
-    public fun deposit<Token: store + drop>(chainId: u8, to_deposit: Diem::Diem<Token>, fee: Diem::Diem<PONT>, recipient: address, metadata: vector<u8>) acquires Configuration, TokenConfiguration {
+    public fun deposit<Token: store + drop>(chainId: u8, to_deposit: Diem<Token>, fee: Diem<PONT>, recipient: address, metadata: vector<u8>) acquires Configuration, TokenConfiguration {
         assert_initialized();
         assert_paused();
 
@@ -317,7 +346,7 @@ module Bridge {
     }
 
     // Vote for proposal.
-    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) : Option::Option<Diem::Diem<Token>> acquires RoleId, Configuration, TokenConfiguration, Proposal {
+    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) : Option<Diem<Token>> acquires RoleId, Configuration, TokenConfiguration, Proposal {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -335,7 +364,7 @@ module Bridge {
         // Destroy proposal if it's rejected.
         if (status == PROPOSAL_STATUS_REJECTED) {
             move_from<Proposal<Token>>(proposer);
-            return Option::none<Diem::Diem<Token>>()
+            return Option::none<Diem<Token>>()
         };
 
         // Match data_hash.
@@ -364,7 +393,7 @@ module Bridge {
 
                 if (token_config.mintable) {
                     // TODO: we should mint new coins.
-                    return Option::none<Diem::Diem<Token>>()
+                    return Option::none<Diem<Token>>()
                 } else {
                     let tokens = Diem::withdraw(&mut token_config.deposits, proposal.amount);
 
@@ -383,7 +412,7 @@ module Bridge {
         };
 
 
-        Option::none<Diem::Diem<Token>>()
+        Option::none<Diem<Token>>()
     }
 
     // Remove porposal in case of deadline.
@@ -461,7 +490,7 @@ module Bridge {
 
         Event::emit_event(
             &mut config.relayers_status_events,
-            RelayersStatus {
+            RelayersStatusEvent {
                 account: Signer::address_of(relayer),
                 status: RELAY_STATUS_ADDED,
                 count: config.relayers,
@@ -481,7 +510,7 @@ module Bridge {
 
         Event::emit_event(
             &mut config.relayers_status_events,
-            RelayersStatus {
+            RelayersStatusEvent {
                 account: relayer,
                 status: RELAY_STATUS_REVOKED,
                 count: config.relayers,
@@ -577,7 +606,7 @@ module Bridge {
 
     // Withdraw fees.
     // TODO: split fees between relayers.
-    public fun withdraw_fees(admin: &signer): Diem::Diem<PONT> acquires RoleId, Configuration {
+    public fun withdraw_fees(admin: &signer): Diem<PONT> acquires RoleId, Configuration {
         assert_admin(admin);
         assert_initialized();
 
