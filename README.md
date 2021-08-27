@@ -68,6 +68,7 @@ As both networks support Move language and Move VM, we implemented Bridge contra
 TODOs:
 
 * Missing fees distribution.
+* More tests.
 
 **About creation of proposals and round-robin**
  
