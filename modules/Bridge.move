@@ -95,7 +95,6 @@ module Bridge {
     struct TokenConfiguration<Token: store + drop> has key {
         mintable: bool,
         deposits: Diem<Token>,
-        to_burn: Diem<Token>,
         mint_capability: Option<Diem::MintCapability<Token>>,
         burn_capability: Option<Diem::BurnCapability<Token>>,
     }
@@ -485,7 +484,6 @@ module Bridge {
         move_to(admin, TokenConfiguration<Token> {
             mintable,
             deposits: Diem::zero<Token>(),
-            to_burn: Diem::zero<Token>(),
             mint_capability,
             burn_capability,
         });
@@ -513,11 +511,10 @@ module Bridge {
         let addr = Signer::address_of(admin);
         assert(exists<TokenConfiguration<Token>>(addr), Errors::custom(ETOKEN_CONFIG_MISSED));
 
-        let TokenConfiguration<Token> { mint_capability: mc, burn_capability: bc, mintable: _, deposits, to_burn } = move_from<TokenConfiguration<Token>>(addr);
+        let TokenConfiguration<Token> { mint_capability: mc, burn_capability: bc, mintable: _, deposits } = move_from<TokenConfiguration<Token>>(addr);
         move_to(admin, TokenConfiguration<Token> {
             mintable, 
             deposits,
-            to_burn,
             mint_capability,
             burn_capability,
         });
@@ -644,9 +641,8 @@ module Bridge {
         
         // Check if token configuration already exists on new admin account.
         if (exists<TokenConfiguration<Token>>(admin_addr)) {
-            let TokenConfiguration<Token> {mintable: _, deposits, to_burn, mint_capability, burn_capability } = move_from(old_admin);
+            let TokenConfiguration<Token> {mintable: _, deposits,  mint_capability, burn_capability } = move_from(old_admin);
             Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposits, deposits);
-            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).to_burn, to_burn);
             (mint_capability, burn_capability)
         } else {
             let config = move_from<TokenConfiguration<Token>>(old_admin);
