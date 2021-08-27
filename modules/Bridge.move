@@ -269,7 +269,7 @@ module Bridge {
 
     // Deposit and token related functions.
     // Deposit.
-    public fun deposit<Token: store + drop>(chainId: u8, to_deposit: Diem<Token>, fee: Diem<PONT>, recipient: address, metadata: vector<u8>) acquires Configuration, TokenConfiguration {
+    public fun deposit<Token: store>(chainId: u8, to_deposit: Diem<Token>, fee: Diem<PONT>, recipient: address, metadata: vector<u8>) acquires Configuration, TokenConfiguration {
         assert_initialized();
         assert_paused();
 
@@ -637,7 +637,7 @@ module Bridge {
     // Move token configuration from old admin to new admin.
     // If configuration already exists moving only tokens.
     // Returns MintCapability and BurnCapability options, that exists returns only in case new config exists.
-    public fun move_token_config<Token: store + drop>(
+    public fun move_token_config<Token: store>(
         admin: &signer, 
         old_admin: address
     ): (
