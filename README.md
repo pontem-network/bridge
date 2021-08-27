@@ -48,7 +48,7 @@ Once the transaction contains a transfer call, the smart contract should emit an
 Once a bridge receives a new transfer on the blockchain A it creates a new proposal on the blockchain B and initiates a voting period on that proposal. A proposal usually contains following information:
 
 - Coin - which coin to mint/unlock. Usually generic type.
-- Proposal ID - id of proposal, u128. It's a deposit nonce on another network.
+- ID - id of proposal, u128. It's a deposit nonce on another network.
 - Amount - amount of coins to transfer, u64.
 - RecipientAddress - address of recipient on another network, should vec<u8>.
 - Metadata - just additional metadata, vec<u8>.
@@ -68,7 +68,10 @@ As both networks support Move language and Move VM, we implemented Bridge contra
 TODOs:
 
 * Missing fees distribution.
-* Burn/mint of new tokens (add mint/burn capability).
+
+**About creation of proposals and round-robin**
+ 
+In Diem any information must be published under account. So, we are going to use round-robin to detect which relayer account should create a proposal. There could exist only one proposal on account. For implementation see [create_proposal](/modules/Bridge.move#321) function. Implementation with vectors could use too much gas. We are still working on it, and we think we can improve it in future with different approaches like HashMap.
 
 ### LICENSE
 
