@@ -4,5 +4,5 @@ account_address = "5GcFHawZJHgwymsu9X2F5Lt5sSX89TxxFgHAMJ7TnoUJKqJD"
 dialect = "pont"
 
 dependencies = [
-    { git = "https://github.com/pontem-network/move-stdlib", branch = "move-1.3" }
+    { git = "https://github.com/pontem-network/move-stdlib", branch = "feature-balances-funcs" }
 ]

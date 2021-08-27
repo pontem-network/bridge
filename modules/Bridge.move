@@ -7,9 +7,9 @@ module Bridge {
     use 0x1::Event::{Self, EventHandle};
     use 0x1::DiemBlock;
     use 0x1::Vector;
-    use 0x1::Option::{Self, Option};
     use 0x1::BCS;
     use 0x1::Hash;
+    use 0x1::DiemAccount;
 
     // Constants.
     // Initial admin account address.
@@ -346,7 +346,7 @@ module Bridge {
     }
 
     // Vote for proposal.
-    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) : Option<Diem<Token>> acquires RoleId, Configuration, TokenConfiguration, Proposal {
+    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) acquires RoleId, Configuration, TokenConfiguration, Proposal {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -364,7 +364,7 @@ module Bridge {
         // Destroy proposal if it's rejected.
         if (status == PROPOSAL_STATUS_REJECTED) {
             move_from<Proposal<Token>>(proposer);
-            return Option::none<Diem<Token>>()
+            return
         };
 
         // Match data_hash.
@@ -392,13 +392,10 @@ module Bridge {
                 let token_config = borrow_global_mut<TokenConfiguration<Token>>(config.admin);
 
                 if (token_config.mintable) {
-                    // TODO: we should mint new coins.
-                    return Option::none<Diem<Token>>()
+                    // TODO: we should mint new coins to recipient.
                 } else {
                     let tokens = Diem::withdraw(&mut token_config.deposits, proposal.amount);
-
-                    // TODO: we should deposit minted coins to user account using DiemAccount.
-                    return Option::some(tokens)
+                    DiemAccount::pnt_deposit(proposal.recipient, tokens);
                 }
             };
         } else {
@@ -410,9 +407,6 @@ module Bridge {
                 move_from<Proposal<Token>>(proposer);
             };
         };
-
-
-        Option::none<Diem<Token>>()
     }
 
     // Remove porposal in case of deadline.
