@@ -10,6 +10,7 @@ module Bridge {
     use 0x1::BCS;
     use 0x1::Hash;
     use 0x1::DiemAccount;
+    use 0x1::Option::{Self, Option};
 
     // Constants.
     // Initial admin account address.
@@ -91,11 +92,12 @@ module Bridge {
     }
 
     // Token configuration.
-    // TODO: add mint/burn capability.
     struct TokenConfiguration<Token: store + drop> has key {
         mintable: bool,
         deposits: Diem<Token>,
         to_burn: Diem<Token>,
+        mint_capability: Option<Diem::MintCapability<Token>>,
+        burn_capability: Option<Diem::BurnCapability<Token>>,
     }
 
     // Proposal.
@@ -294,7 +296,7 @@ module Bridge {
         // Store fees.
         if (token_config.mintable) {
             // Add current deposit to burn balance.
-            Diem::deposit(&mut token_config.to_burn, to_deposit);
+            Diem::pnt_burn_with_capability(Option::borrow(&token_config.burn_capability), to_deposit);
         } else {
             // Token is not mintable, so we deposit it to token configuration storage for later withdraws.
             Diem::deposit(&mut token_config.deposits, to_deposit);
@@ -392,7 +394,8 @@ module Bridge {
                 let token_config = borrow_global_mut<TokenConfiguration<Token>>(config.admin);
 
                 if (token_config.mintable) {
-                    // TODO: we should mint new coins to recipient.
+                    let tokens = Diem::mint_with_capability<Token>(proposal.amount, Option::borrow(&token_config.mint_capability));
+                    DiemAccount::pnt_deposit(proposal.recipient, tokens);
                 } else {
                     let tokens = Diem::withdraw(&mut token_config.deposits, proposal.amount);
                     DiemAccount::pnt_deposit(proposal.recipient, tokens);
@@ -449,26 +452,62 @@ module Bridge {
     }
 
     // Add token configuration to admin.
-    fun add_token_config<Token: store + drop>(admin: &signer, mintable: bool) acquires RoleId {
+    fun add_token_config<Token: store + drop>(
+        admin: &signer, 
+        mintable: bool, 
+        mint_capability: Option<Diem::MintCapability<Token>>, 
+        burn_capability: Option<Diem::BurnCapability<Token>>
+    ) acquires RoleId {
         assert_admin(admin);
         assert_initialized();
 
         assert(!exists<TokenConfiguration<Token>>(Signer::address_of(admin)), Errors::custom(ETOKEN_CONFIG_EXISTS));
+
+        if (mintable && (Option::is_none(&mint_capability) || Option::is_none(&burn_capability))) {
+            abort 101
+        };
+
         move_to(admin, TokenConfiguration<Token> {
             mintable,
             deposits: Diem::zero<Token>(),
             to_burn: Diem::zero<Token>(),
+            mint_capability,
+            burn_capability,
         });
     }
 
     // Change token configuration.
-    fun change_token_mintable<Token: store + drop>(admin: &signer, mintable: bool) acquires RoleId, TokenConfiguration {
+    // If mintable == true so mint_capability and burn_capability should have a value.
+    // Returns previous mint_capability and burn_capability.
+    fun change_token_mintable<Token: store + drop>(
+        admin: &signer,
+        mintable: bool,
+        mint_capability: Option<Diem::MintCapability<Token>>,
+        burn_capability: Option<Diem::BurnCapability<Token>>
+    ): (
+        Option<Diem::MintCapability<Token>>,
+        Option<Diem::BurnCapability<Token>>
+    ) acquires RoleId, TokenConfiguration {
         assert_admin(admin);
         assert_initialized();
 
+        if (mintable && (Option::is_none(&mint_capability) || Option::is_none(&burn_capability))) {
+            abort 101
+        };
+
         let addr = Signer::address_of(admin);
         assert(exists<TokenConfiguration<Token>>(addr), Errors::custom(ETOKEN_CONFIG_MISSED));
-        borrow_global_mut<TokenConfiguration<Token>>(addr).mintable = mintable;
+
+        let TokenConfiguration<Token> { mint_capability: mc, burn_capability: bc, mintable: _, deposits, to_burn } = move_from<TokenConfiguration<Token>>(addr);
+        move_to(admin, TokenConfiguration<Token> {
+            mintable, 
+            deposits,
+            to_burn,
+            mint_capability,
+            burn_capability,
+        });
+
+        (mc, bc)
     }
 
     // Relayers.
@@ -572,29 +611,32 @@ module Bridge {
     }
 
     // Move token configuration from old admin to new admin.
-    public fun move_token_config<Token: store + drop>(admin: &signer, old_admin: address, mintable: bool) acquires RoleId, TokenConfiguration {
+    // If configuration already exists moving only tokens.
+    // Returns MintCapability and BurnCapability options, that exists returns only in case new config exists.
+    public fun move_token_config<Token: store + drop>(
+        admin: &signer, 
+        old_admin: address
+    ): (
+        Option<Diem::MintCapability<Token>>,
+        Option<Diem::BurnCapability<Token>>
+    ) acquires RoleId, TokenConfiguration {
         assert_admin(admin);
         assert_initialized();
 
         assert(exists<TokenConfiguration<Token>>(old_admin), Errors::custom(ETOKEN_CONFIG_MISSED));
 
         let admin_addr = Signer::address_of(admin);
+        
         // Check if token configuration already exists on new admin account.
         if (exists<TokenConfiguration<Token>>(admin_addr)) {
-            let old_config = borrow_global_mut<TokenConfiguration<Token>>(old_admin);
-
-            let deposit_value = Diem::value(&old_config.deposits);
-            let deposit_withdraw = Diem::withdraw<Token>(&mut old_config.deposits, deposit_value);
-            let to_burn_value = Diem::value<Token>(&old_config.to_burn);
-            let to_burn_withdraw = Diem::withdraw(&mut old_config.to_burn, to_burn_value);
-
-            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposits, deposit_withdraw);
-            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).to_burn, to_burn_withdraw);
-            borrow_global_mut<TokenConfiguration<Token>>(admin_addr).mintable = mintable;
+            let TokenConfiguration<Token> {mintable: _, deposits, to_burn, mint_capability, burn_capability } = move_from(old_admin);
+            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).deposits, deposits);
+            Diem::deposit<Token>(&mut borrow_global_mut<TokenConfiguration<Token>>(admin_addr).to_burn, to_burn);
+            (mint_capability, burn_capability)
         } else {
             let config = move_from<TokenConfiguration<Token>>(old_admin);
-            config.mintable = mintable;
             move_to(admin, config);
+            (Option::none(), Option::none())
         }
     }
 
