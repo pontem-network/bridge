@@ -345,6 +345,8 @@ module Bridge {
             votes_yes: Vector::empty(),
             votes_no: Vector::empty(),
         };
+
+        Vector::push_back(&mut proposal.votes_yes, Signer::address_of(relayer));
         move_to(relayer, proposal);
     }
 
@@ -469,7 +471,7 @@ module Bridge {
             return PROPOSAL_STATUS_REJECTED
         };
 
-        if (proposal.deadline > DiemBlock::get_current_block_height()) {
+        if (proposal.deadline <= DiemBlock::get_current_block_height()) {
             return PROPOSAL_STATUS_REJECTED
         };
 
