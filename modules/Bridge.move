@@ -139,6 +139,7 @@ module Bridge {
     // Tokens related.
     const ETOKEN_CONFIG_EXISTS: u64 = 200; // Token config already exists.
     const ETOKEN_CONFIG_MISSED: u64 = 201; // Token config missed.
+    const ETOKEN_WRONG_MINT_CONFIG: u64 = 202; // Token mint configuration is wrong: if mintable == true and mint_capability and burn_capability missed.
 
     // Deposits.
     const EDEPOSIT_WRONG_FEE: u64 = 300; // Wrong fee provided to deposit.
@@ -151,6 +152,7 @@ module Bridge {
     const EPROPOSAL_WRONG_ID: u64 = 404; // Wrong id.
     const EPROPOSAL_DOUBLE_VOTE: u64 = 404; // Double vote for proposal.
     const EPROPOSAL_WRONG_DATA: u64 = 405; // Wrong data when vote for proposal.
+    const EPROPOSAL_ACTIVE: u64 = 406; // Trying to execute proposal when it's active
 
     // Initialization.
     // Initialize bridge.
@@ -412,8 +414,8 @@ module Bridge {
         };
     }
 
-    // Remove porposal in case of deadline.
-    public fun remove_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal {
+    // Remove porposal because of deadline.
+    public fun execute_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal, TokenConfiguration {
         assert_initialized();
 
         assert(exists<Proposal<Token>>(proposer), Errors::custom(EPROPOSAL_MISSED));
@@ -429,9 +431,21 @@ module Bridge {
         if (status == PROPOSAL_STATUS_REJECTED) {
             move_from<Proposal<Token>>(proposer);
             return
+        } else if (status == PROPOSAL_STATUS_PASSED) {
+            let token_config = borrow_global_mut<TokenConfiguration<Token>>(config.admin);
+
+            if (token_config.mintable) {
+                let tokens = Diem::mint_with_capability<Token>(proposal.amount, Option::borrow(&token_config.mint_capability));
+                DiemAccount::pnt_deposit(proposal.recipient, tokens);
+            } else {
+                let tokens = Diem::withdraw(&mut token_config.deposits, proposal.amount);
+                DiemAccount::pnt_deposit(proposal.recipient, tokens);
+            };
+
+            return
         };
 
-        abort 307 // Throw error as proposal not rejected yet 
+        abort EPROPOSAL_ACTIVE // Throw error as proposal not rejected yet 
     } 
 
     // Returns proposal status.
@@ -460,11 +474,12 @@ module Bridge {
     ) acquires RoleId {
         assert_admin(admin);
         assert_initialized();
+        Diem::assert_is_currency<Token>();
 
         assert(!exists<TokenConfiguration<Token>>(Signer::address_of(admin)), Errors::custom(ETOKEN_CONFIG_EXISTS));
 
         if (mintable && (Option::is_none(&mint_capability) || Option::is_none(&burn_capability))) {
-            abort 101
+            abort ETOKEN_WRONG_MINT_CONFIG
         };
 
         move_to(admin, TokenConfiguration<Token> {
@@ -492,7 +507,7 @@ module Bridge {
         assert_initialized();
 
         if (mintable && (Option::is_none(&mint_capability) || Option::is_none(&burn_capability))) {
-            abort 101
+            abort ETOKEN_WRONG_MINT_CONFIG
         };
 
         let addr = Signer::address_of(admin);
