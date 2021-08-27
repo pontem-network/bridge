@@ -92,7 +92,7 @@ module Bridge {
     }
 
     // Token configuration.
-    struct TokenConfiguration<Token: store + drop> has key {
+    struct TokenConfiguration<Token: store> has key {
         mintable: bool,
         deposits: Diem<Token>,
         mint_capability: Option<Diem::MintCapability<Token>>,
@@ -103,7 +103,7 @@ module Bridge {
     const PROPOSAL_STATUS_VOTING: u64 = 0;
     const PROPOSAL_STATUS_REJECTED: u64 = 1;
     const PROPOSAL_STATUS_PASSED: u64 = 2;
-    struct Proposal<Token: store + drop> has key, store, drop {
+    struct Proposal<_Token: store> has key, store, drop {
         id: u128,
         amount: u64,
         recipient: address,
@@ -319,7 +319,7 @@ module Bridge {
 
     // Creating proposal, relayer choosed using standard off-chain round robin.
     // See README for better explanation.
-    public fun create_proposal<Token: store + drop>(relayer: &signer, id: u128, chainId: u8, currency_code: vector<u8>, amount: u64, recipient: address, metadata: vector<u8>) acquires RoleId, Configuration {
+    public fun create_proposal<Token: store>(relayer: &signer, id: u128, chainId: u8, currency_code: vector<u8>, amount: u64, recipient: address, metadata: vector<u8>) acquires RoleId, Configuration {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -349,7 +349,7 @@ module Bridge {
     }
 
     // Vote for proposal.
-    public fun vote<Token: store + drop>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) acquires RoleId, Configuration, TokenConfiguration, Proposal {
+    public fun vote<Token: store>(relayer: &signer, proposer: address, id: u128, yes: bool, data_hash: vector<u8>) acquires RoleId, Configuration, TokenConfiguration, Proposal {
         assert_initialized();
         assert_paused();
         assert_relayer(relayer);
@@ -366,7 +366,7 @@ module Bridge {
 
         // Destroy proposal if it's rejected.
         if (status == PROPOSAL_STATUS_REJECTED) {
-            move_from<Proposal<Token>>(proposer);
+            destroy_proposal<Token>(proposer);
             return
         };
 
@@ -408,13 +408,13 @@ module Bridge {
 
             // Destroy proposal.
             if (new_status == PROPOSAL_STATUS_REJECTED) {
-                move_from<Proposal<Token>>(proposer);
+                destroy_proposal<Token>(proposer);
             };
         };
     }
 
     // Remove porposal because of deadline.
-    public fun execute_proposal<Token: store + drop>(id: u128, proposer: address) acquires Configuration, Proposal, TokenConfiguration {
+    public fun execute_proposal<Token: store>(id: u128, proposer: address) acquires Configuration, Proposal, TokenConfiguration {
         assert_initialized();
 
         assert(exists<Proposal<Token>>(proposer), Errors::custom(EPROPOSAL_MISSED));
@@ -428,7 +428,7 @@ module Bridge {
         let status = proposal_status<Token>(proposal, config);
 
         if (status == PROPOSAL_STATUS_REJECTED) {
-            move_from<Proposal<Token>>(proposer);
+            destroy_proposal<Token>(proposer);
             return
         } else if (status == PROPOSAL_STATUS_PASSED) {
             let token_config = borrow_global_mut<TokenConfiguration<Token>>(config.admin);
@@ -447,8 +447,20 @@ module Bridge {
         abort EPROPOSAL_ACTIVE // Throw error as proposal not rejected yet 
     } 
 
+    fun destroy_proposal<Token: store>(proposer: address) acquires Proposal {
+        let Proposal<Token> {
+            id: _,
+            amount: _,
+            recipient: _,
+            metadata: _,
+            deadline: _,
+            votes_yes: _,
+            votes_no: _,
+        } = move_from<Proposal<Token>>(proposer);
+    }
+
     // Returns proposal status.
-    fun proposal_status<Token: store + drop>(proposal: &Proposal<Token>, config: &Configuration): u64 {
+    fun proposal_status<Token: store>(proposal: &Proposal<Token>, config: &Configuration): u64 {
         if (Vector::length(&proposal.votes_yes) >= config.threshold) {
             return PROPOSAL_STATUS_PASSED
         };
@@ -465,7 +477,7 @@ module Bridge {
     }
 
     // Add token configuration to admin.
-    fun add_token_config<Token: store + drop>(
+    public fun add_token_config<Token: store>(
         admin: &signer, 
         mintable: bool, 
         mint_capability: Option<Diem::MintCapability<Token>>, 
@@ -492,7 +504,7 @@ module Bridge {
     // Change token configuration.
     // If mintable == true so mint_capability and burn_capability should have a value.
     // Returns previous mint_capability and burn_capability.
-    fun change_token_mintable<Token: store + drop>(
+    fun change_token_mintable<Token: store>(
         admin: &signer,
         mintable: bool,
         mint_capability: Option<Diem::MintCapability<Token>>,
