@@ -2,6 +2,9 @@
 
 **THIS PROJECT IS NOT READY FOR PRODUCTION YET, IT'S IN ACTIVE DEVELOPMENT**
 
+Requirements:
+    * [Dove](https://github.com/pontem-network/move-tools/releases)
+
 This document describes research around building a bridge between Diem and Pontem Network. 
 
 Current goal is to allow transfer assets (mostly standard ERC20 like tokens) between both networks. The bridge is going to be based on Proof of Authority currently and later could be swapped with Governance or even PoS validators. 
@@ -73,6 +76,10 @@ TODOs:
 **About creation of proposals and round-robin**
  
 In Diem any information must be published under account. So, we are going to use round-robin to detect which relayer account should create a proposal. There could exist only one proposal on account. For implementation see [create_proposal](/modules/Bridge.move#321) function. Implementation with vectors could use too much gas. We are still working on it, and we think we can improve it in future with different approaches like HashMap.
+
+### Tests
+
+    dove test
 
 ### LICENSE
 
